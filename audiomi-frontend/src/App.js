@@ -47,26 +47,40 @@ function App() {
       const base64Image = await getBase64(file);
 
       // GPT prompt for music sheet analysis
-      const prompt = `
-        You are a music theory assistant. Given an image of a music sheet, extract the musical notes and durations as JSON.
+      const promptText = `
+        You are a music theory assistant. Given an image of a music sheet, extract the musical notes and durations as JSON. Note should be the note. Duration should be 'length' relative in beats. smallest 'length' unit should be 1. So C1 mean C note for 1 beat (or smallest unit)
         Example:
-        [
-          { "note": "C4", "duration": "quarter" },
-          { "note": "D4", "duration": "eighth" }
-        ]
+        JSON: musicNote="C1, B2, D3"
         Please process this image and return the result in JSON format.
       `;
 
       const response = await client.chat.completions.create({
-        model: "gpt-4-turbo",
+        model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are an expert in music transcription." },
-          { role: "user", content: prompt },
-          { role: "user", content: `Image (base64): ${base64Image}` },
+          {
+            "role": "user",
+            "content": [
+              { "type": "text", "text": promptText },
+              { type: "image_url", image_url: { url: base64Image } } // Remove "data:image/png;base64," prefix
+            ],
+          }
         ],
+        temperature: 0,
+        response_format: { "type": "json_object" },
+        //max_tokens = 300,
       });
 
       const extractedMusic = JSON.parse(response.choices[0].message.content);
+      console.log("HEE" + extractedMusic);
+      var musicT = extractedMusic.musicNote;
+      const musicCode = parseMusicInput(musicT);
+      saveMusic(musicCode);
+
+
+      console.log("Extracted music:", extractedMusic);
+      console.log("Extracted music:", musicCode);
+      //
+
       await saveMusic(extractedMusic);
 
     } catch (error) {
