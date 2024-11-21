@@ -14,7 +14,7 @@ function App() {
 
   const client = new OpenAI({
     apiKey: process.env.REACT_APP_OPENAI_API_KEY,
-    dangerouslyAllowBrowser: true, // Allow browser-based API calls
+    dangerouslyAllowBrowser: true,
   });
 
   useEffect(() => {
@@ -44,20 +44,29 @@ function App() {
     setError(null);
 
     try {
-      // Convert file to Base64
       const base64Image = await getBase64(file);
 
-      // If the GPT API does not natively support images:
-      // You need a vision API to extract text/music notes from the image first.
-      // Then, pass the text to GPT for analysis.
-      const visionResponse = await client.images.generate({
-        prompt: "Extract text or notes from this sheet music image.",
-        image: base64Image,
+      // GPT prompt for music sheet analysis
+      const prompt = `
+        You are a music theory assistant. Given an image of a music sheet, extract the musical notes and durations as JSON.
+        Example:
+        [
+          { "note": "C4", "duration": "quarter" },
+          { "note": "D4", "duration": "eighth" }
+        ]
+        Please process this image and return the result in JSON format.
+      `;
+
+      const response = await client.chat.completions.create({
+        model: "gpt-4-turbo",
+        messages: [
+          { role: "system", content: "You are an expert in music transcription." },
+          { role: "user", content: prompt },
+          { role: "user", content: `Image (base64): ${base64Image}` },
+        ],
       });
 
-      const extractedMusic = JSON.parse(visionResponse.data);
-
-      // Save the extracted music to Firebase
+      const extractedMusic = JSON.parse(response.choices[0].message.content);
       await saveMusic(extractedMusic);
 
     } catch (error) {
@@ -86,7 +95,6 @@ function App() {
   const handleManualInputSave = () => {
     if (!musicInput.trim()) {
       alert("Please enter a valid music input.");
-      console.log("Please enter a valid music input.");
       return;
     }
     const musicCode = parseMusicInput(musicInput);
@@ -95,10 +103,9 @@ function App() {
   };
 
   const parseMusicInput = (input) => {
-    // Example of converting user input into a structured format
     return input.split(",").map((item) => {
       const [note, duration] = item.trim().split(/(\d+)/);
-      return { note, duration: parseInt(duration) };
+      return { note, duration: parseInt(duration) || 0 };
     });
   };
 
@@ -132,7 +139,6 @@ function App() {
           <div className="space-y-6">
             {error && <p className="text-red-500 text-sm">{error}</p>}
 
-            {/* Display saved music */}
             {savedMusic.length > 0 && (
               <div className="p-4 bg-gray-50 rounded-lg">
                 <h2 className="text-lg font-semibold text-gray-700">
@@ -148,7 +154,6 @@ function App() {
               </div>
             )}
 
-            {/* Manual Input Section */}
             <div>
               <label
                 htmlFor="manualInput"
@@ -172,7 +177,6 @@ function App() {
               </button>
             </div>
 
-            {/* Upload Sheet Music Section */}
             <div>
               <label
                 htmlFor="sheetUpload"
