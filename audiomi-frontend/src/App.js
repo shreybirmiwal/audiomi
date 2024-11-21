@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import "tailwindcss/tailwind.css";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import OpenAI from "openai";
 
 function App() {
   const uid = new URLSearchParams(window.location.search).get("uid");
@@ -9,17 +10,28 @@ function App() {
   const [uploadedSheet, setUploadedSheet] = useState(null);
   const [savedMusic, setSavedMusic] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const client = new OpenAI({
+    apiKey: process.env.REACT_APP_OPENAI_API_KEY,
+    dangerouslyAllowBrowser: true, // Allow browser-based API calls
+  });
 
   useEffect(() => {
     if (uid) {
       const fetchMusic = async () => {
         setLoading(true);
-        const docRef = doc(db, "users", uid);
-        const docSnap = await getDoc(docRef);
+        try {
+          const docRef = doc(db, "users", uid);
+          const docSnap = await getDoc(docRef);
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setSavedMusic(data.musicCode || []);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setSavedMusic(data.musicCode || []);
+          }
+        } catch (error) {
+          console.error("Error fetching music:", error);
+          setError("Failed to fetch saved music.");
         }
         setLoading(false);
       };
@@ -27,19 +39,47 @@ function App() {
     }
   }, [uid]);
 
-  const saveMusic = async (musicCode) => {
-    if (!uid) {
-      alert("User ID not found. Please provide a valid user ID.");
-      console.log("User ID not found. Please provide a valid user ID.");
-      return
-    };
+  const extractMusicFromSheet = async (file) => {
+    setLoading(true);
+    setError(null);
 
     try {
+      // Convert file to Base64
+      const base64Image = await getBase64(file);
+
+      // If the GPT API does not natively support images:
+      // You need a vision API to extract text/music notes from the image first.
+      // Then, pass the text to GPT for analysis.
+      const visionResponse = await client.images.generate({
+        prompt: "Extract text or notes from this sheet music image.",
+        image: base64Image,
+      });
+
+      const extractedMusic = JSON.parse(visionResponse.data);
+
+      // Save the extracted music to Firebase
+      await saveMusic(extractedMusic);
+
+    } catch (error) {
+      console.error("Error extracting music:", error);
+      setError("Failed to extract music from the uploaded sheet.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveMusic = async (musicCode) => {
+    try {
+      if (!uid) {
+        throw new Error("User ID not found. Please provide a valid user ID.");
+      }
+
       const userRef = doc(db, "users", uid);
       await setDoc(userRef, { musicCode });
       setSavedMusic(musicCode);
     } catch (error) {
       console.error("Error saving music:", error);
+      setError("Failed to save extracted music.");
     }
   };
 
@@ -54,27 +94,29 @@ function App() {
     setMusicInput("");
   };
 
-  const handleSheetUpload = () => {
-    if (!uploadedSheet) return;
-    const musicCode = extractMusicFromSheet(uploadedSheet);
-    saveMusic(musicCode);
-    setUploadedSheet(null);
-  };
-
   const parseMusicInput = (input) => {
     // Example of converting user input into a structured format
-    // Input: "A1, B2, C#4"
-    // Output: [{ note: "A", duration: 1 }, { note: "B", duration: 2 }, ...]
     return input.split(",").map((item) => {
       const [note, duration] = item.trim().split(/(\d+)/);
       return { note, duration: parseInt(duration) };
     });
   };
 
-  const extractMusicFromSheet = (file) => {
-    // Placeholder for GPT API integration to extract music from the sheet
-    console.log("Extracting music from:", file);
-    return [{ note: "C", duration: 4 }, { note: "D", duration: 2 }]; // Example output
+  const handleSheetUpload = () => {
+    if (!uploadedSheet) {
+      alert("Please upload a valid sheet music image.");
+      return;
+    }
+    extractMusicFromSheet(uploadedSheet);
+  };
+
+  const getBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (error) => reject(error);
+    });
   };
 
   return (
@@ -85,9 +127,11 @@ function App() {
         </h1>
 
         {loading ? (
-          <p className="text-center text-gray-500">Loading...</p>
+          <p className="text-center text-gray-500">Processing...</p>
         ) : (
           <div className="space-y-6">
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+
             {/* Display saved music */}
             {savedMusic.length > 0 && (
               <div className="p-4 bg-gray-50 rounded-lg">
