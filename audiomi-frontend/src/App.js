@@ -3,11 +3,14 @@ import "tailwindcss/tailwind.css";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import OpenAI from "openai";
+import { FileUploader } from "react-drag-drop-files";
+
+const fileTypes = ["JPG", "PNG"];
+
 
 function App() {
   const uid = new URLSearchParams(window.location.search).get("uid");
   const [musicInput, setMusicInput] = useState("");
-  const [uploadedSheet, setUploadedSheet] = useState(null);
   const [savedMusic, setSavedMusic] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -43,52 +46,52 @@ function App() {
     setLoading(true);
     setError(null);
 
-    try {
-      const base64Image = await getBase64(file);
+    const base64Image = await getBase64(file);
 
-      // GPT prompt for music sheet analysis
-      const promptText = `
-        You are a music theory assistant. Given an image of a music sheet, extract the musical notes and durations as JSON. Note should be the note. Duration should be 'length' relative in beats. smallest 'length' unit should be 1. So C1 mean C note for 1 beat (or smallest unit)
-        Example:
-        JSON: musicNote="C1, B2, D3"
-        Please process this image and return the result in JSON format.
+    // GPT prompt for music sheet analysis
+    const jsonOutput = JSON.stringify({
+      musicCode: [{
+        note: "a",
+        duration: 1,
+      }, {
+        note: "b",
+        duration: 2,
+      }, {
+        note: "c",
+        duration: 3,
+      }],
+    });
+
+    const promptText = `
+        You are a music theory assistant. Given an image of a music sheet, extract the musical notes and durations as JSON. Note should be the note. Duration should be 'length' relative in beats. smallest 'length' unit should be 1. So c1 mean c note for 1 beat (or smallest unit)
+        Return in JSON format:
+        ${jsonOutput}
       `;
 
-      const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            "role": "user",
-            "content": [
-              { "type": "text", "text": promptText },
-              { type: "image_url", image_url: { url: base64Image } } // Remove "data:image/png;base64," prefix
-            ],
-          }
-        ],
-        temperature: 0,
-        response_format: { "type": "json_object" },
-        //max_tokens = 300,
-      });
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          "role": "user",
+          "content": [
+            { "type": "text", "text": promptText },
+            { type: "image_url", image_url: { url: base64Image } } // Remove "data:image/png;base64," prefix
+          ],
+        }
+      ],
+      temperature: 0,
+      response_format: { "type": "json_object" },
+      //max_tokens = 300,
+    });
 
-      const extractedMusic = JSON.parse(response.choices[0].message.content);
-      console.log("HEE" + extractedMusic);
-      var musicT = extractedMusic.musicNote;
-      const musicCode = parseMusicInput(musicT);
-      saveMusic(musicCode);
+    console.log("Response:", response);
 
+    const extractedMusic = JSON.parse(response.choices[0].message.content);
+    console.log("Extracted music:", extractedMusic);
 
-      console.log("Extracted music:", extractedMusic);
-      console.log("Extracted music:", musicCode);
-      //
+    saveMusic(extractedMusic.musicCode);
 
-      await saveMusic(extractedMusic);
-
-    } catch (error) {
-      console.error("Error extracting music:", error);
-      setError("Failed to extract music from the uploaded sheet.");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   };
 
   const saveMusic = async (musicCode) => {
@@ -123,13 +126,6 @@ function App() {
     });
   };
 
-  const handleSheetUpload = () => {
-    if (!uploadedSheet) {
-      alert("Please upload a valid sheet music image.");
-      return;
-    }
-    extractMusicFromSheet(uploadedSheet);
-  };
 
   const getBase64 = (file) => {
     return new Promise((resolve, reject) => {
@@ -139,6 +135,8 @@ function App() {
       reader.onerror = (error) => reject(error);
     });
   };
+
+
 
   return (
     <div className="min-h-screen bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center p-6">
@@ -179,7 +177,7 @@ function App() {
                 type="text"
                 id="manualInput"
                 className="mt-1 p-3 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="e.g., A1, B2, C4"
+                placeholder="e.g., a1, b2, c4"
                 value={musicInput}
                 onChange={(e) => setMusicInput(e.target.value)}
               />
@@ -196,21 +194,12 @@ function App() {
                 htmlFor="sheetUpload"
                 className="block text-sm font-medium text-gray-700"
               >
-                Upload Sheet Music (Image)
+                Upload Sheet Music (Image) [**HIGHLY EXPERIMENTAL**]
               </label>
-              <input
-                type="file"
-                id="sheetUpload"
-                className="mt-1 block w-full text-gray-500"
-                accept="image/*"
-                onChange={(e) => setUploadedSheet(e.target.files[0])}
-              />
-              <button
-                className="mt-4 w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition"
-                onClick={handleSheetUpload}
-              >
-                Extract & Save Music
-              </button>
+
+              <FileUploader handleChange={extractMusicFromSheet} name="file" types={fileTypes} />
+
+
             </div>
           </div>
         )}
